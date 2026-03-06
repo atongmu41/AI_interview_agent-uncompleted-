@@ -35,10 +35,38 @@ class AgentLLM:
             temperature=0,
         )
 
+    def _extract_text(self, out) -> str:
+        """从 API 返回值中提取可解析的文本。支持消息块列表（含 type='text' 的 text 字段）。"""
+        if isinstance(out, list):
+            parts = []
+            for x in out:
+                if isinstance(x, dict):
+                    # 兼容 type='text' 的块（如部分 API 返回 reasoning + text 分块）
+                    if x.get("type") == "text" and "text" in x:
+                        parts.append(str(x["text"]))
+                    elif "text" in x:
+                        parts.append(str(x["text"]))
+                    elif "content" in x:
+                        parts.append(str(x["content"]))
+                    else:
+                        continue  # reasoning/encrypted 等块跳过，不拼进可解析文本
+                elif hasattr(x, "content"):
+                    parts.append(str(x.content))
+                else:
+                    parts.append(str(x))
+            return "\n".join(parts) if parts else str(out)
+        if hasattr(out, "content"):
+            # AIMessage.content 也可能是 list（多模态）
+            c = out.content
+            if isinstance(c, list):
+                return self._extract_text(c)
+            return str(c)
+        return str(out)
+
     def invoke(self, prompt: str) -> str:
-        """调用大模型 API，返回模型回复的文本内容。"""
-        message = self._llm.invoke(prompt)
-        return message.content if hasattr(message, "content") else str(message)
+        """调用大模型 API，返回模型回复的文本内容（保证为 str）。"""
+        out = self._llm.invoke(prompt)
+        return self._extract_text(out)
 
     @property
     def llm(self):
